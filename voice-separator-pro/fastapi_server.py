@@ -8,8 +8,10 @@ import tempfile
 import os
 from pydub import AudioSegment
 from noisereduce import reduce_noise
-import uvicorn
 
+# --------------------------------------------------
+# APP SETUP
+# --------------------------------------------------
 app = FastAPI(title="Voice Separator Pro - CPU Edition")
 
 app.add_middleware(
@@ -20,8 +22,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# --------------------------------------------------
+# CONSTANTS
+# --------------------------------------------------
 CLEAN_FILENAME = "clean_audio.wav"
-CLEAN_PATH = os.path.join(os.getcwd(), CLEAN_FILENAME)
+CLEAN_PATH = os.path.join("/tmp", CLEAN_FILENAME)  # safer on Render
+
+# --------------------------------------------------
+# ROUTES
+# --------------------------------------------------
+@app.get("/")
+async def root():
+    return {"message": "Voice Separator Pro - CPU Mode ✅"}
 
 @app.get("/health")
 async def health():
@@ -30,100 +42,96 @@ async def health():
 @app.post("/api/separate")
 async def separate_audio(file: UploadFile = File(...)):
     tmp_path = None
+
     try:
-        print(f"🎵 Processing: {file.filename}")
-        
         # Save uploaded file
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp:
-            contents = await file.read()
-            tmp.write(contents)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+            tmp.write(await file.read())
             tmp_path = tmp.name
-        
-        # Load audio with error handling
+
+        # Load audio
         try:
             audio, sr = librosa.load(tmp_path, sr=22050, mono=True)
-        except:
-            audio_segment = AudioSegment.from_file(tmp_path)
-            samples = np.array(audio_segment.get_array_of_samples())
-            if audio_segment.channels == 2:
+        except Exception:
+            audio_seg = AudioSegment.from_file(tmp_path)
+            samples = np.array(audio_seg.get_array_of_samples())
+
+            if audio_seg.channels == 2:
                 samples = samples.reshape((-1, 2)).mean(axis=1)
+
             audio = samples.astype(np.float32) / 32768.0
             sr = 22050
-        
+
         duration = len(audio) / sr
-        
+
         # Noise reduction
         try:
-            noise_clip = audio[:int(sr * 0.5)]
-            audio_clean = reduce_noise(audio, sr=sr, y_noise=noise_clip)
-        except:
+            noise_clip = audio[: int(sr * 0.5)]
+            audio_clean = reduce_noise(y=audio, sr=sr, y_noise=noise_clip)
+        except Exception:
             audio_clean = audio
-        
-        # Voice activity detection
+
+        # Simple energy-based VAD
         hop_length = 512
         frame_length = 2048
-        energy = librosa.feature.rms(y=audio_clean, frame_length=frame_length, hop_length=hop_length)[0]
+        energy = librosa.feature.rms(
+            y=audio_clean,
+            frame_length=frame_length,
+            hop_length=hop_length
+        )[0]
+
         threshold = np.mean(energy) * 2.5
-        
-        segments = []
         speech_frames = energy > threshold
+
+        segments = []
         i = 0
         while i < len(speech_frames):
             if speech_frames[i]:
-                start_frame = i
+                start = i
                 while i < len(speech_frames) and speech_frames[i]:
                     i += 1
-                end_frame = i
-                duration_seg = (end_frame - start_frame) * hop_length / sr
-                if duration_seg > 0.2:
+                end = i
+
+                dur = (end - start) * hop_length / sr
+                if dur > 0.2:
                     segments.append({
-                        'start': round(start_frame * hop_length / sr, 2),
-                        'end': round(end_frame * hop_length / sr, 2),
-                        'duration': round(duration_seg, 2)
+                        "start": round(start * hop_length / sr, 2),
+                        "end": round(end * hop_length / sr, 2),
+                        "duration": round(dur, 2),
                     })
             else:
                 i += 1
-        
-        total_speech = sum(seg['duration'] for seg in segments)
-        speech_pct = min(100.0, (total_speech / duration * 100) if duration > 0 else 0)
-        
-        # SAVE CLEAN AUDIO
-        sf.write(CLEAN_PATH, audio_clean, int(sr))
-        print(f"💾 SAVED CLEAN AUDIO: {CLEAN_PATH}")
-        
-        if tmp_path and os.path.exists(tmp_path):
-            os.unlink(tmp_path)
-        
-        print(f"✅ SUCCESS: {len(segments)} segments, {speech_pct:.1f}% speech")
-        
+
+        total_speech = sum(seg["duration"] for seg in segments)
+        speech_pct = (total_speech / duration * 100) if duration > 0 else 0
+
+        # Save cleaned audio
+        sf.write(CLEAN_PATH, audio_clean, sr)
+
         return {
             "status": "success",
             "filename": file.filename,
-            "duration": float(duration),
-            "speech_duration": float(total_speech),
-            "speech_percentage": float(speech_pct),
+            "duration": round(duration, 2),
+            "speech_duration": round(total_speech, 2),
+            "speech_percentage": round(min(100.0, speech_pct), 2),
             "segments": segments[:10],
-            "clean_file": CLEAN_FILENAME
+            "clean_file": CLEAN_FILENAME,
         }
-        
+
     except Exception as e:
-        print(f"❌ ERROR: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    finally:
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
-        raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
 
 @app.get("/download/{filename}")
 async def download_file(filename: str):
-    if filename != CLEAN_FILENAME:
+    if filename != CLEAN_FILENAME or not os.path.exists(CLEAN_PATH):
         raise HTTPException(status_code=404, detail="File not found")
-    if not os.path.exists(CLEAN_PATH):
-        raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(CLEAN_PATH, media_type="audio/wav", filename=filename)
 
-@app.get("/")
-async def root():
-    return {"message": "Voice Separator Pro - CPU Mode ✅"}
-
-if __name__ == "__main__":
-    print("🚀 Starting CPU Voice Separator on PORT 8001...")
-    uvicorn.run(app, host="0.0.0.0", port=8001)  # CHANGED TO 8001
+    return FileResponse(
+        CLEAN_PATH,
+        media_type="audio/wav",
+        filename=CLEAN_FILENAME
+    )
