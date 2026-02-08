@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎵 Voice Separator Pro</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px;
+        }
+        .container {
+            background: white; border-radius: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); 
+            max-width: 600px; width: 100%; padding: 40px; 
+        }
+        h1 { color: #333; margin-bottom: 10px; text-align: center; font-size: 2.2em; }
+        .subtitle { text-align: center; color: #666; margin-bottom: 30px; font-size: 1.1em; }
+        .config-section { background: #f8f9fa; padding: 20px; border-radius: 12px; margin-bottom: 30px; }
+        label { display: block; margin-bottom: 8px; font-weight: 600; color: #333; }
+        input[type="text"] { width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 1em; margin-bottom: 10px; transition: border-color 0.3s; }
+        input[type="text"]:focus { outline: none; border-color: #667eea; }
+        .button-group { display: flex; gap: 10px; }
+        button { flex: 1; padding: 12px; border: none; border-radius: 8px; font-size: 1em; font-weight: 600; cursor: pointer; transition: all 0.3s; }
+        .btn-test { background: #667eea; color: white; }
+        .btn-test:hover { background: #5568d3; }
+        .status { display: inline-block; margin-top: 10px; padding: 8px 12px; border-radius: 6px; font-size: 0.9em; font-weight: 600; }
+        .status.connected { background: #d4edda; color: #155724; }
+        .status.disconnected { background: #f8d7da; color: #721c24; }
+        .upload-box { border: 3px dashed #667eea; border-radius: 12px; padding: 40px 20px; text-align: center; cursor: pointer; transition: all 0.3s; background: #f8f9ff; margin-bottom: 20px; }
+        .upload-box:hover { background: #f0f2ff; border-color: #5568d3; }
+        .upload-box.dragover { background: #e8ecff; border-color: #5568d3; }
+        .upload-icon { font-size: 3em; margin-bottom: 15px; }
+        #fileInput { display: none; }
+        .process-button { width: 100%; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px; border: none; border-radius: 8px; font-size: 1.1em; font-weight: 700; cursor: pointer; transition: transform 0.2s; margin-bottom: 30px; }
+        .process-button:hover:not(:disabled) { transform: translateY(-2px); }
+        .process-button:disabled { opacity: 0.6; cursor: not-allowed; }
+        .loading { display: none; text-align: center; margin: 20px 0; }
+        .spinner { border: 4px solid #f3f3f3; border-top: 4px solid #667eea; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 15px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .results { display: none; background: #f8f9fa; padding: 20px; border-radius: 12px; margin-top: 20px; }
+        .results h2 { color: #28a745; margin-bottom: 15px; }
+        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px; }
+        .stat-card { background: white; padding: 15px; border-radius: 8px; border-left: 4px solid #667eea; text-align: center; }
+        .stat-value { font-size: 1.8em; font-weight: 700; color: #667eea; }
+        .stat-label { font-size: 0.9em; color: #666; margin-top: 5px; }
+        .audio-player { background: white; padding: 20px; border-radius: 12px; margin: 20px 0; border: 2px solid #28a745; }
+        .audio-player audio { width: 100%; margin-top: 10px; }
+        .error { background: #f8d7da; color: #721c24; padding: 15px; border-radius: 8px; margin-top: 20px; display: none; }
+        .raw-json { background: #e9ecef; padding: 15px; border-radius: 8px; font-family: monospace; font-size: 0.8em; max-height: 200px; overflow-y: auto; display: none; }
+        @media (max-width: 768px) { .stats-grid { grid-template-columns: 1fr; } .button-group { flex-direction: column; } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎵 Voice Separator Pro</h1>
+        <p class="subtitle">AI-powered voice cleaning (CPU Mode)</p>
+
+        <div class="config-section">
+            <label for="apiUrl">API URL:</label>
+            <input type="text" id="apiUrl" value="http://localhost:8001" placeholder="http://localhost:8001">
+            <div class="button-group">
+                <button class="btn-test" onclick="testConnection()">Test Connection</button>
+            </div>
+            <div id="status" class="status disconnected">❌ Not Connected</div>
+        </div>
+
+        <div class="upload-box" id="uploadBox" onclick="document.getElementById('fileInput').click()">
+            <div class="upload-icon">☁️</div>
+            <h3>Click or drag audio file</h3>
+            <p>WAV • MP3 • M4A • AAC • OGG</p>
+        </div>
+        <input type="file" id="fileInput" accept="audio/*">
+
+        <button class="process-button" id="processBtn" onclick="processAudio()" disabled>🚀 CLEAN VOICE</button>
+
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>Processing audio... (10-30s)</p>
+        </div>
+
+        <div class="error" id="error"></div>
+
+        <div class="results" id="results">
+            <h2>✅ Processing Complete!</h2>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value" id="totalDuration">0s</div>
+                    <div class="stat-label">Total Duration</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="speechDuration">0s</div>
+                    <div class="stat-label">Clean Speech</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="speechPercent">0%</div>
+                    <div class="stat-label">Speech %</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="segmentCount">0</div>
+                    <div class="stat-label">Segments Found</div>
+                </div>
+            </div>
+
+            <!-- 🎵 CLEAN AUDIO PLAYER -->
+            <div class="audio-player">
+                <h3>🎵 Clean Audio (Play Directly)</h3>
+                <audio id="cleanAudioPlayer" controls style="width: 100%;">
+                    Your browser does not support the audio element.
+                </audio>
+            </div>
+
+            <div style="text-align: center; margin-top: 20px;">
+                <button onclick="downloadClean()" style="background: #28a745; color: white; padding: 12px 24px; border: none; border-radius: 8px; font-size: 1em; cursor: pointer; margin-right: 10px;">💾 Download Clean Audio</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentResult = null;
+        let apiUrl = 'http://localhost:8001';
+        let isConnected = false;
+        let selectedFile = null;
+        let cleanAudioUrl = null;
+
+        // Drag & Drop
+        const uploadBox = document.getElementById('uploadBox');
+        ['dragover', 'dragenter'].forEach(e => uploadBox.addEventListener(e, ev => {
+            ev.preventDefault(); 
+            uploadBox.classList.add('dragover');
+        }));
+        ['dragleave', 'drop'].forEach(e => uploadBox.addEventListener(e, ev => {
+            ev.preventDefault(); 
+            uploadBox.classList.remove('dragover');
+            if (e === 'drop' && ev.dataTransfer.files[0]) {
+                processSelectedFile(ev.dataTransfer.files[0]);
+            }
+        }));
+
+        document.getElementById('fileInput').addEventListener('change', e => {
+            if (e.target.files[0]) {
+                processSelectedFile(e.target.files[0]);
+            }
+        });
+
+        function processSelectedFile(file) {
+            selectedFile = file;
+            document.getElementById('processBtn').disabled = false;
+            document.getElementById('processBtn').textContent = `🚀 CLEAN: ${file.name}`;
+            showError('');
+        }
+
+        async function testConnection() {
+            apiUrl = document.getElementById('apiUrl').value;
+            try {
+                const res = await fetch(`${apiUrl}/health`);
+                const data = await res.json();
+                if (res.ok && data.status === 'healthy') {
+                    isConnected = true;
+                    document.getElementById('status').textContent = `✅ Connected (${data.mode || 'API'})`;
+                    document.getElementById('status').className = 'status connected';
+                    showError('');
+                } else {
+                    throw new Error('Health check failed');
+                }
+            } catch (e) {
+                isConnected = false;
+                document.getElementById('status').textContent = '❌ Connection Failed';
+                document.getElementById('status').className = 'status disconnected';
+                showError('Server not running? Try http://localhost:8001');
+            }
+        }
+
+        async function processAudio() {
+            if (!isConnected) {
+                showError('Test connection first!');
+                return;
+            }
+            if (!selectedFile) {
+                showError('Select audio file first!');
+                return;
+            }
+
+            const loading = document.getElementById('loading');
+            const results = document.getElementById('results');
+            const btn = document.getElementById('processBtn');
+            
+            loading.style.display = 'block';
+            results.style.display = 'none';
+            btn.disabled = true;
+            showError('');
+            document.getElementById('cleanAudioPlayer').src = '';
+
+            try {
+                const formData = new FormData();
+                formData.append('file', selectedFile);
+                
+                const res = await fetch(`${apiUrl}/api/separate`, { 
+                    method: 'POST', 
+                    body: formData 
+                });
+                
+                if (!res.ok) {
+                    const errorText = await res.text();
+                    throw new Error(`Server error: ${res.status} ${errorText}`);
+                }
+                
+                currentResult = await res.json();
+                console.log('✅ Response:', currentResult);
+                
+                displayResults();
+                
+            } catch (e) {
+                console.error('Process error:', e);
+                showError('Processing failed: ' + e.message);
+            } finally {
+                loading.style.display = 'none';
+                btn.disabled = false;
+                btn.textContent = '🚀 CLEAN VOICE';
+            }
+        }
+
+        function displayResults() {
+            const results = document.getElementById('results');
+            results.style.display = 'block';
+            
+            const safeNum = (val) => typeof val === 'number' ? val.toFixed(1) : '0.0';
+            const safeInt = (val) => Math.floor(Number(val) || 0);
+            
+            document.getElementById('totalDuration').textContent = safeNum(currentResult.duration) + 's';
+            document.getElementById('speechDuration').textContent = safeNum(currentResult.speech_duration) + 's';
+            document.getElementById('speechPercent').textContent = safeNum(currentResult.speech_percentage) + '%';
+            document.getElementById('segmentCount').textContent = safeInt(currentResult.segments?.length || 0);
+
+            // 🎵 LOAD CLEAN AUDIO AUTOMATICALLY
+            if (currentResult.clean_file) {
+                cleanAudioUrl = `${apiUrl}/download/${currentResult.clean_file}`;
+                document.getElementById('cleanAudioPlayer').src = cleanAudioUrl;
+            }
+        }
+
+        function downloadClean() {
+            if (cleanAudioUrl) {
+                window.open(cleanAudioUrl, '_blank');
+            } else {
+                alert('No clean audio available');
+            }
+        }
+
+        function showError(msg) {
+            const errorDiv = document.getElementById('error');
+            errorDiv.textContent = msg;
+            errorDiv.style.display = msg ? 'block' : 'none';
+        }
+
+        window.onload = testConnection;
+    </script>
+</body>
+</html>
